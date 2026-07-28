@@ -185,13 +185,17 @@ function handleHostData(conn, data) {
     if (existingIdx !== -1) {
       const existingPlayer = players[existingIdx];
       
-      // FIX: Mobile devices often leave "ghost" connections that still read as open.
-      // Instead of rejecting the player, we assume it's the original player returning
-      // and forcefully overwrite their old connection.
+      // Close the ghost connection if it exists
       if (existingPlayer.conn && existingPlayer.conn !== conn) {
         try { existingPlayer.conn.close(); } catch(e) {}
       }
 
+      // FIX: If the reconnecting player is the Impostor, update the impostorId to their new PeerJS ID
+      if (existingPlayer.id === impostorId) {
+        impostorId = conn.peer;
+      }
+
+      // Update the player's current connection and ID
       players[existingIdx].conn = conn;
       players[existingIdx].id = conn.peer;
       
