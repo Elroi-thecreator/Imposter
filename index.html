@@ -2,312 +2,481 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>The Impostor - Multiplayer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>The Impostor - Party Game</title>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
     :root {
       --bg: #0f172a;
       --card-bg: #1e293b;
       --accent: #ef4444;
+      --accent-active: #dc2626;
       --text: #f8fafc;
       --subtext: #94a3b8;
       --border: #334155;
+      --input-bg: #0f172a;
+      --success: #38bdf8;
     }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
     body {
-      font-family: system-ui, -apple-system, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background-color: var(--bg);
       color: var(--text);
       display: flex;
       justify-content: center;
       align-items: center;
       min-height: 100vh;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
       margin: 0;
-      padding: 20px;
-      box-sizing: border-box;
     }
-    .card {
+
+    .app-card {
       background-color: var(--card-bg);
-      padding: 2rem;
-      border-radius: 16px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      padding: 1.5rem;
+      border-radius: 20px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
       width: 100%;
       max-width: 420px;
+      margin: 16px;
       text-align: center;
     }
-    h1 { margin-top: 0; color: var(--accent); }
-    .input-group { margin: 15px 0; text-align: left; }
-    label { display: block; margin-bottom: 5px; color: var(--subtext); font-size: 0.9rem; }
-    input {
-      width: 100%;
-      padding: 12px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: #0f172a;
-      color: white;
-      box-sizing: border-box;
-      font-size: 1rem;
+
+    h1 { margin-top: 0; font-size: 1.8rem; color: var(--accent); }
+    h2 { font-size: 1.3rem; margin-top: 0; }
+    h3 { font-size: 0.95rem; color: var(--subtext); margin-bottom: 8px; }
+
+    .input-group { margin: 12px 0; text-align: left; }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--subtext);
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
+
+    input, select {
+      width: 100%;
+      padding: 14px;
+      border-radius: 12px;
+      border: 1.5px solid var(--border);
+      background: var(--input-bg);
+      color: white;
+      font-size: 16px;
+      outline: none;
+    }
+
     button {
       width: 100%;
-      padding: 12px;
+      padding: 14px;
       background-color: var(--accent);
       color: white;
       border: none;
-      border-radius: 8px;
-      font-weight: bold;
+      border-radius: 12px;
+      font-weight: 700;
       font-size: 1rem;
       cursor: pointer;
       margin-top: 10px;
+      touch-action: manipulation;
     }
+
+    button:active { transform: scale(0.98); background-color: var(--accent-active); }
     .sec-btn { background-color: #334155; }
+
     .room-code {
-      font-size: 1.8rem;
-      font-weight: bold;
-      letter-spacing: 2px;
-      color: #38bdf8;
-      background: #0f172a;
-      padding: 10px;
-      border-radius: 8px;
-      border: 1px dashed var(--border);
-      margin: 15px 0;
-      word-break: break-all;
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: 4px;
+      color: var(--success);
+      background: var(--input-bg);
+      padding: 12px;
+      border-radius: 12px;
+      border: 2px dashed var(--border);
+      margin: 12px 0;
     }
+
     .player-list {
       text-align: left;
-      background: #0f172a;
-      padding: 10px 15px;
-      border-radius: 8px;
-      margin: 15px 0;
-      max-height: 120px;
+      background: var(--input-bg);
+      padding: 10px 14px;
+      border-radius: 12px;
+      margin: 12px 0;
+      max-height: 140px;
       overflow-y: auto;
+      border: 1px solid var(--border);
     }
+
+    .player-item {
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
     .secret-card {
-      background: #0f172a;
+      background: var(--input-bg);
       border: 2px dashed var(--border);
-      padding: 25px;
-      border-radius: 8px;
-      margin: 20px 0;
+      padding: 24px 15px;
+      border-radius: 16px;
+      margin: 16px 0;
       font-size: 1.4rem;
-      font-weight: bold;
+      font-weight: 800;
     }
-    .hidden { display: none; }
+
+    .vote-btn {
+      background-color: #1e293b;
+      border: 1.5px solid var(--border);
+      text-align: left;
+      padding: 12px;
+      margin-top: 6px;
+    }
+
+    .divider {
+      margin: 14px 0;
+      color: var(--subtext);
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+    }
+    .divider::before, .divider::after {
+      content: ""; flex: 1; border-bottom: 1px solid var(--border);
+    }
+    .divider::before { margin-right: 10px; }
+    .divider::after { margin-left: 10px; }
+
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
 
   <!-- HOME SCREEN -->
-  <div class="card" id="home-screen">
+  <div class="app-card" id="home-screen">
     <h1>🕵️ The Impostor</h1>
     <div class="input-group">
-      <label>Your Name:</label>
-      <input type="text" id="player-name" placeholder="Enter your name">
+      <label>Your Nickname</label>
+      <input type="text" id="player-name" placeholder="Enter name..." autocomplete="off">
     </div>
-    <button onclick="createRoom()">Create Game (Host)</button>
-    <div style="margin: 15px 0; color: var(--subtext);">— OR —</div>
+    <button onclick="createRoom()">Create Room (Host)</button>
+
+    <div class="divider">OR</div>
+
     <div class="input-group">
-      <label>Room Code:</label>
-      <input type="text" id="join-code" placeholder="Enter Room Code">
+      <label>Room Code</label>
+      <input type="text" id="join-code" placeholder="e.g. X7K2P" style="text-transform: uppercase;" autocomplete="off">
     </div>
     <button class="sec-btn" onclick="joinRoom()">Join Game</button>
   </div>
 
   <!-- LOBBY SCREEN -->
-  <div class="card hidden" id="lobby-screen">
-    <h2 id="lobby-title">Lobby</h2>
-    <p style="color: var(--subtext);">Share this link or code with players:</p>
+  <div class="app-card hidden" id="lobby-screen">
+    <h2>Room Lobby</h2>
     <div class="room-code" id="display-code">...</div>
     <button class="sec-btn" onclick="copyInviteLink()">📋 Copy Invite Link</button>
 
-    <h3>Players Connected:</h3>
-    <div class="player-list" id="player-list-display">
-      <div>• Connecting...</div>
+    <div style="margin-top: 15px;">
+      <h3>Players in Lobby</h3>
+      <div class="player-list" id="player-list-display"></div>
     </div>
 
     <div id="host-controls" class="hidden">
       <div class="input-group">
-        <label>Custom Word (Optional):</label>
-        <input type="text" id="custom-word-input" placeholder="Leave blank for random">
+        <label>Category / Word Source</label>
+        <select id="category-select" onchange="toggleCustomWordInput()">
+          <option value="RANDOM">🎲 Random (All Built-In Words)</option>
+          <option value="Places & Landmarks">📍 Places & Landmarks</option>
+          <option value="Food & Drink">🍔 Food & Drink</option>
+          <option value="Pop Culture & Fantasy">🪄 Pop Culture & Fantasy</option>
+          <option value="Animals & Nature">🦁 Animals & Nature</option>
+          <option value="CUSTOM">✏️ Custom Word</option>
+        </select>
       </div>
+
+      <div class="input-group hidden" id="custom-word-group">
+        <label>Custom Word</label>
+        <input type="text" id="custom-word-input" placeholder="Type secret word...">
+      </div>
+
       <button onclick="hostStartGame()">Start Game</button>
     </div>
-    <p id="waiting-msg" style="color: var(--subtext);">Waiting for host to start...</p>
+    <p id="waiting-msg" style="color: var(--subtext); font-size: 0.9rem;">Waiting for host to start...</p>
   </div>
 
   <!-- GAME SCREEN -->
-  <div class="card hidden" id="game-screen">
+  <div class="app-card hidden" id="game-screen">
     <h2>Your Secret Role</h2>
-    <div class="secret-card" id="role-display">
-      Loading...
+    <div class="secret-card" id="role-display">Loading...</div>
+    <p id="category-hint" style="color: var(--subtext); font-size: 0.9rem;"></p>
+
+    <div id="host-discussion-controls" class="hidden" style="margin-top: 15px;">
+      <button onclick="hostStartVoting()">Start Voting Phase</button>
     </div>
-    <p style="color: var(--subtext);">Discuss with the group and find out who doesn't know the word!</p>
-    <button id="restart-btn" class="hidden" onclick="hostRestartGame()">Play Again</button>
+  </div>
+
+  <!-- VOTING SCREEN -->
+  <div class="app-card hidden" id="voting-screen">
+    <h2>Who is the Impostor?</h2>
+    <p style="color: var(--subtext); font-size: 0.85rem;">Cast your vote based on who gave suspicious clues!</p>
+    <div id="vote-options-list"></div>
+  </div>
+
+  <!-- RESULT SCREEN -->
+  <div class="app-card hidden" id="result-screen">
+    <h2 id="result-title">Game Over</h2>
+    <div class="secret-card" id="result-details"></div>
+    <button id="next-round-btn" class="hidden" onclick="hostReturnToLobby()">Return to Lobby</button>
+    <p id="client-wait-lobby" style="color: var(--subtext); font-size: 0.9rem;">Waiting for host to start next round...</p>
   </div>
 
   <script>
-    const BUILT_IN_WORDS = ["Pizza", "Space", "Beach", "Castle", "Superhero", "Doctor", "Penguin", "Bicycle", "Dragon", "Coffee", "Airplane", "Pyramid", "Telescope", "Submarine", "Volcano", "Hollywood", "Basketball", "Dinosaur", "Astronaut", "Eiffel Tower"];
-    
-    let peer = null;
-    let isHost = false;
-    let roomCode = "";
-    let myName = "";
-    let players = []; // { id, name, conn }
-    let hostConn = null;
+    const WORD_CATEGORIES = {
+      "Places & Landmarks": ["Eiffel Tower", "Pyramid", "Hollywood", "Volcano", "Hogwarts", "Airport", "Casino", "Aquarium", "Hospital", "Cinema"],
+      "Food & Drink": ["Pizza", "Sushi", "Chocolate", "Tacos", "Burger", "Pancakes", "Bubble Tea", "Spaghetti", "Donut", "Ramen"],
+      "Pop Culture & Fantasy": ["Superhero", "Dragon", "Wizard", "Unicorn", "Pirate", "Ninja", "Astronaut", "Alien", "Zombie", "Vampire"],
+      "Animals & Nature": ["Penguin", "Dinosaur", "Waterfall", "Tornado", "Octopus", "Kangaroo", "Flamingo", "Sloth", "Panda", "Cheetah"]
+    };
 
-    // Check if joining via URL link
+    let peer = null, isHost = false, roomCode = "", myName = "", myPeerId = "";
+    let players = []; // { id, name, conn }
+    let hostConn = null, secretWord = "", currentCategory = "", impostorId = "";
+    let votes = {}; // { targetId: count }
+
     window.onload = () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const codeFromUrl = urlParams.get('room');
-      if (codeFromUrl) {
-        document.getElementById('join-code').value = codeFromUrl;
-      }
+      const code = new URLSearchParams(window.location.search).get('room');
+      if (code) document.getElementById('join-code').value = code.toUpperCase();
     };
 
     function getName() {
       const name = document.getElementById('player-name').value.trim();
-      if (!name) { alert("Please enter your name!"); return null; }
+      if (!name) { alert("Please enter your nickname!"); return null; }
       return name;
     }
 
-    // HOST FLOW
     function createRoom() {
-      myName = getName();
-      if (!myName) return;
-
+      myName = getName(); if (!myName) return;
       isHost = true;
       roomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
-      
       peer = new Peer(`impostor-room-${roomCode}`);
 
-      peer.on('open', () => {
-        showLobby();
+      peer.on('open', (id) => {
+        myPeerId = id;
+        showScreen('lobby-screen');
         players.push({ id: peer.id, name: myName, conn: null });
         updatePlayerList();
       });
 
       peer.on('connection', (conn) => {
-        conn.on('data', (data) => {
-          if (data.type === 'JOIN') {
-            players.push({ id: conn.peer, name: data.name, conn: conn });
-            updatePlayerList();
-            broadcastLobbyState();
-          }
-        });
+        conn.on('data', (data) => handleHostData(conn, data));
       });
-
-      peer.on('error', (err) => alert("Error creating room. Try again!"));
     }
 
-    // JOINER FLOW
     function joinRoom() {
-      myName = getName();
-      if (!myName) return;
-
+      myName = getName(); if (!myName) return;
       const codeInput = document.getElementById('join-code').value.trim().toUpperCase();
-      if (!codeInput) return alert("Please enter a Room Code!");
-
+      if (!codeInput) return alert("Enter Room Code!");
+      
       roomCode = codeInput;
       peer = new Peer();
 
-      peer.on('open', () => {
+      peer.on('open', (id) => {
+        myPeerId = id;
         hostConn = peer.connect(`impostor-room-${roomCode}`);
-        
-        hostConn.on('open', () => {
-          hostConn.send({ type: 'JOIN', name: myName });
-          showLobby();
-        });
-
-        hostConn.on('data', (data) => {
-          if (data.type === 'LOBBY_STATE') {
-            updatePlayerListFromNames(data.playerNames);
-          } else if (data.type === 'GAME_START') {
-            showGameScreen(data.role, data.word);
-          }
-        });
-
-        hostConn.on('error', () => alert("Could not connect to room!"));
+        hostConn.on('open', () => hostConn.send({ type: 'JOIN', name: myName }));
+        hostConn.on('data', (data) => handleClientData(data));
       });
     }
 
-    function showLobby() {
-      document.getElementById('home-screen').classList.add('hidden');
-      document.getElementById('lobby-screen').classList.remove('hidden');
-      document.getElementById('display-code').innerText = roomCode;
+    function handleHostData(conn, data) {
+      if (data.type === 'JOIN') {
+        players.push({ id: conn.peer, name: data.name, conn: conn });
+        updatePlayerList();
+        broadcastLobbyState();
+      } else if (data.type === 'CAST_VOTE') {
+        votes[data.targetId] = (votes[data.targetId] || 0) + 1;
+        if (Object.values(votes).reduce((a,b)=>a+b, 0) >= players.length) {
+          tallyVotes();
+        }
+      }
+    }
 
+    function handleClientData(data) {
+      if (data.type === 'LOBBY_STATE') {
+        updatePlayerListFromNames(data.playerNames);
+        showScreen('lobby-screen');
+      } else if (data.type === 'GAME_START') {
+        showGameScreen(data.role, data.word, data.category);
+      } else if (data.type === 'START_VOTING') {
+        showVotingScreen(data.playerList);
+      } else if (data.type === 'GAME_OVER') {
+        showResultScreen(data.ejectedName, data.isImpostor, data.secretWord, data.impostorName);
+      }
+    }
+
+    function toggleCustomWordInput() {
+      const val = document.getElementById('category-select').value;
+      document.getElementById('custom-word-group').classList.toggle('hidden', val !== 'CUSTOM');
+    }
+
+    function hostStartGame() {
+      if (players.length < 3) return alert("You need at least 3 players!");
+
+      const catVal = document.getElementById('category-select').value;
+      if (catVal === 'CUSTOM') {
+        secretWord = document.getElementById('custom-word-input').value.trim();
+        currentCategory = "Custom Choice";
+        if (!secretWord) return alert("Please enter a custom word!");
+      } else if (catVal === 'RANDOM') {
+        const keys = Object.keys(WORD_CATEGORIES);
+        currentCategory = keys[Math.floor(Math.random() * keys.length)];
+        const list = WORD_CATEGORIES[currentCategory];
+        secretWord = list[Math.floor(Math.random() * list.length)];
+      } else {
+        currentCategory = catVal;
+        const list = WORD_CATEGORIES[currentCategory];
+        secretWord = list[Math.floor(Math.random() * list.length)];
+      }
+
+      const impostorIdx = Math.floor(Math.random() * players.length);
+      impostorId = players[impostorIdx].id;
+      votes = {};
+
+      players.forEach((p) => {
+        const isImp = (p.id === impostorId);
+        const payload = {
+          type: 'GAME_START',
+          role: isImp ? 'IMPOSTOR' : 'CREWMATE',
+          word: isImp ? null : secretWord,
+          category: currentCategory
+        };
+
+        if (p.conn) p.conn.send(payload);
+        else showGameScreen(payload.role, payload.word, payload.category);
+      });
+    }
+
+    function showGameScreen(role, word, category) {
+      showScreen('game-screen');
+      const display = document.getElementById('role-display');
+      const hint = document.getElementById('category-hint');
+
+      if (role === 'IMPOSTOR') {
+        display.innerText = "🚨 YOU ARE THE IMPOSTOR!";
+        display.style.color = "var(--accent)";
+        hint.innerText = `Category Hint: ${category}`;
+      } else {
+        display.innerText = `Word: ${word}`;
+        display.style.color = "var(--success)";
+        hint.innerText = `Category: ${category}`;
+      }
+
+      if (isHost) document.getElementById('host-discussion-controls').classList.remove('hidden');
+    }
+
+    function hostStartVoting() {
+      const playerListPayload = players.map(p => ({ id: p.id, name: p.name }));
+      players.forEach(p => {
+        if (p.conn) p.conn.send({ type: 'START_VOTING', playerList: playerListPayload });
+        else showVotingScreen(playerListPayload);
+      });
+    }
+
+    function showVotingScreen(playerListPayload) {
+      showScreen('voting-screen');
+      const listEl = document.getElementById('vote-options-list');
+      listEl.innerHTML = playerListPayload.map(p => `
+        <button class="vote-btn" onclick="submitVote('${p.id}')">Vote for ${p.name}</button>
+      `).join('');
+    }
+
+    function submitVote(targetId) {
+      document.getElementById('vote-options-list').innerHTML = "<p style='color:var(--subtext)'>Vote submitted! Waiting for others...</p>";
       if (isHost) {
+        votes[targetId] = (votes[targetId] || 0) + 1;
+        if (Object.values(votes).reduce((a,b)=>a+b, 0) >= players.length) tallyVotes();
+      } else {
+        hostConn.send({ type: 'CAST_VOTE', targetId: targetId });
+      }
+    }
+
+    function tallyVotes() {
+      let maxVotes = 0, ejectedId = null;
+      for (let id in votes) {
+        if (votes[id] > maxVotes) { maxVotes = votes[id]; ejectedId = id; }
+      }
+
+      const ejectedPlayer = players.find(p => p.id === ejectedId);
+      const impostorPlayer = players.find(p => p.id === impostorId);
+      const isImp = (ejectedId === impostorId);
+
+      players.forEach(p => {
+        const payload = {
+          type: 'GAME_OVER',
+          ejectedName: ejectedPlayer ? ejectedPlayer.name : "Nobody",
+          isImpostor: isImp,
+          secretWord: secretWord,
+          impostorName: impostorPlayer.name
+        };
+        if (p.conn) p.conn.send(payload);
+        else showResultScreen(payload.ejectedName, payload.isImpostor, payload.secretWord, payload.impostorName);
+      });
+    }
+
+    function showResultScreen(ejectedName, isImpostor, secretWord, impostorName) {
+      showScreen('result-screen');
+      const title = document.getElementById('result-title');
+      const details = document.getElementById('result-details');
+
+      if (isImpostor) {
+        title.innerText = "🎉 Crewmates Win!";
+        title.style.color = "var(--success)";
+      } else {
+        title.innerText = "🚨 Impostor Wins!";
+        title.style.color = "var(--accent)";
+      }
+
+      details.innerHTML = `
+        <p style="font-size:1.1rem; margin-top:0;"><strong>${ejectedName}</strong> was voted out.</p>
+        <hr style="border:0; border-top:1px solid var(--border); margin:10px 0;">
+        <p style="font-size:0.95rem; color:var(--subtext); margin:5px 0;">The Impostor was: <strong>${impostorName}</strong></p>
+        <p style="font-size:0.95rem; color:var(--subtext); margin:5px 0;">Secret Word: <strong>${secretWord}</strong></p>
+      `;
+
+      if (isHost) document.getElementById('next-round-btn').classList.remove('hidden');
+    }
+
+    function hostReturnToLobby() {
+      broadcastLobbyState();
+      showScreen('lobby-screen');
+    }
+
+    function showScreen(id) {
+      ['home-screen', 'lobby-screen', 'game-screen', 'voting-screen', 'result-screen'].forEach(s => {
+        document.getElementById(s).classList.add('hidden');
+      });
+      document.getElementById(id).classList.remove('hidden');
+      if (id === 'lobby-screen' && isHost) {
         document.getElementById('host-controls').classList.remove('hidden');
         document.getElementById('waiting-msg').classList.add('hidden');
       }
     }
 
-    function updatePlayerList() {
-      const names = players.map(p => p.name);
-      updatePlayerListFromNames(names);
-    }
-
+    function updatePlayerList() { updatePlayerListFromNames(players.map(p => p.name)); }
     function updatePlayerListFromNames(names) {
-      const listEl = document.getElementById('player-list-display');
-      listEl.innerHTML = names.map(n => `<div>• ${n}</div>`).join('');
+      document.getElementById('player-list-display').innerHTML = names.map(n => `<div class="player-item"><span>• ${n}</span></div>`).join('');
     }
-
     function broadcastLobbyState() {
       const names = players.map(p => p.name);
-      players.forEach(p => {
-        if (p.conn) p.conn.send({ type: 'LOBBY_STATE', playerNames: names });
-      });
+      players.forEach(p => { if (p.conn) p.conn.send({ type: 'LOBBY_STATE', playerNames: names }); });
     }
-
-    function hostStartGame() {
-      if (players.length < 3) return alert("You need at least 3 players to start!");
-
-      const customWord = document.getElementById('custom-word-input').value.trim();
-      const secretWord = customWord || BUILT_IN_WORDS[Math.floor(Math.random() * BUILT_IN_WORDS.length)];
-      
-      const impostorIndex = Math.floor(Math.random() * players.length);
-
-      players.forEach((p, index) => {
-        const isImpostor = (index === impostorIndex);
-        const data = {
-          type: 'GAME_START',
-          role: isImpostor ? 'IMPOSTOR' : 'CREWMATE',
-          word: isImpostor ? null : secretWord
-        };
-
-        if (p.conn) {
-          p.conn.send(data);
-        } else {
-          // Host's own view
-          showGameScreen(data.role, data.word);
-        }
-      });
-    }
-
-    function showGameScreen(role, word) {
-      document.getElementById('lobby-screen').classList.add('hidden');
-      document.getElementById('game-screen').classList.remove('hidden');
-
-      const display = document.getElementById('role-display');
-      if (role === 'IMPOSTOR') {
-        display.innerText = "🚨 YOU ARE THE IMPOSTOR!";
-        display.style.color = "var(--accent)";
-      } else {
-        display.innerText = `Word: ${word}`;
-        display.style.color = "#38bdf8";
-      }
-
-      if (isHost) {
-        document.getElementById('restart-btn').classList.remove('hidden');
-      }
-    }
-
     function copyInviteLink() {
       const link = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
-      navigator.clipboard.writeText(link);
-      alert("Invite link copied to clipboard!");
-    }
-
-    function hostRestartGame() {
-      location.reload();
+      navigator.clipboard.writeText(link).then(() => alert("Link copied to clipboard!"));
     }
   </script>
 </body>
