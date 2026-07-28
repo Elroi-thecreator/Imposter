@@ -269,9 +269,17 @@
     let isChaosRound = false;
     let submittedClues = {};
     let votes = {};
+    let joinRetryCount = 0;
 
     window.onload = () => {
       const codeFromUrl = new URLSearchParams(window.location.search).get('room');
+      
+      // Check session storage for auto-fill after refresh
+      const savedName = sessionStorage.getItem("impostor_name");
+      if (savedName) {
+        document.getElementById('player-name').value = savedName;
+      }
+
       if (codeFromUrl) {
         isHost = false;
         roomCode = codeFromUrl.toUpperCase();
@@ -290,6 +298,7 @@
     function getName() {
       const name = document.getElementById('player-name').value.trim();
       if (!name) { alert("Please enter your nickname!"); return null; }
+      sessionStorage.setItem("impostor_name", name);
       return name;
     }
 
@@ -297,6 +306,21 @@
       const btn = document.getElementById('join-btn');
       btn.disabled = false;
       btn.innerText = "Join Game";
+      joinRetryCount = 0;
+    }
+
+    function initPeer(id = null) {
+      const config = {
+        debug: 1,
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' }
+          ]
+        }
+      };
+      return id ? new Peer(id, config) : new Peer(config);
     }
 
     function createRoom() {
@@ -307,7 +331,9 @@
 
       isHost = true;
       roomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
-      peer = new Peer(`impostor-room-${roomCode}`);
+      
+      if (peer) peer.destroy();
+      peer = initPeer(`impostor-room-${roomCode}`);
 
       peer.on('open', (id) => {
         myPeerId = id;
@@ -320,8 +346,8 @@
         conn.on('data', (data) => handleHostData(conn, data));
       });
 
-      peer.on('error', () => {
-        alert("Error creating room. Try refreshing!");
+      peer.on('error', (err) => {
+        alert("Error creating room. Please try tapping Create again!");
         createBtn.disabled = false;
         createBtn.innerText = "Create Game Room";
       });
@@ -332,42 +358,75 @@
 
       const joinBtn = document.getElementById('join-btn');
       joinBtn.disabled = true;
-      joinBtn.innerText = "Connecting...";
+      joinBtn.innerText = joinRetryCount > 0 ? `Retrying (${joinRetryCount}/3)...` : "Connecting...";
 
       if (peer) peer.destroy();
-      peer = new Peer();
+      peer = initPeer();
 
       peer.on('open', (id) => {
         myPeerId = id;
-        hostConn = peer.connect(`impostor-room-${roomCode}`);
         
-        hostConn.on('open', () => hostConn.send({ type: 'JOIN', name: myName }));
+        hostConn = peer.connect(`impostor-room-${roomCode}`, { reliable: true });
+
+        let connectionTimeout = setTimeout(() => {
+          if (!hostConn || !hostConn.open) {
+            handleJoinFailure("Connection timed out. Ensure Host room is active.");
+          }
+        }, 8000);
+
+        hostConn.on('open', () => {
+          clearTimeout(connectionTimeout);
+          // Send join request
+          hostConn.send({ type: 'JOIN', name: myName });
+        });
+
         hostConn.on('data', (data) => handleClientData(data));
-        
+
         hostConn.on('error', () => {
-          alert("Could not connect to host.");
-          resetJoinBtn();
+          clearTimeout(connectionTimeout);
+          handleJoinFailure("Host room not found or offline.");
         });
       });
 
       peer.on('error', () => {
-        alert("Network error. Could not reach server.");
-        resetJoinBtn();
+        handleJoinFailure("Failed to reach matchmaking server.");
       });
+    }
+
+    function handleJoinFailure(reason) {
+      if (joinRetryCount < 2) {
+        joinRetryCount++;
+        setTimeout(() => joinRoom(), 1500);
+      } else {
+        alert(`${reason}\n\nTips:\n1. Make sure Host is on Lobby/Game screen.\n2. Re-enter your name if needed.`);
+        resetJoinBtn();
+      }
     }
 
     function handleHostData(conn, data) {
       if (data.type === 'JOIN') {
-        const isDuplicate = players.some(
-          p => p.name.trim().toLowerCase() === data.name.trim().toLowerCase()
+        const nameLower = data.name.trim().toLowerCase();
+        
+        // Find existing index if player is reconnecting after a refresh
+        const existingIdx = players.findIndex(
+          p => p.name.trim().toLowerCase() === nameLower
         );
 
-        if (isDuplicate) {
-          conn.send({ 
-            type: 'JOIN_REJECTED', 
-            reason: `The name "${data.name}" is already taken. Choose another nickname.` 
-          });
-          return;
+        if (existingIdx !== -1) {
+          // Check if connection is alive. If dead, overwrite connection (Reconnection logic)
+          const existingPlayer = players[existingIdx];
+          if (!existingPlayer.conn || !existingPlayer.conn.open) {
+            players[existingIdx].conn = conn;
+            players[existingIdx].id = conn.peer;
+            broadcastLobbyState();
+            return;
+          } else {
+            conn.send({ 
+              type: 'JOIN_REJECTED', 
+              reason: `The name "${data.name}" is actively being used. Choose a different nickname.` 
+            });
+            return;
+          }
         }
 
         players.push({ id: conn.peer, name: data.name, conn: conn });
