@@ -16,6 +16,7 @@
       --border: #334155;
       --input-bg: #0f172a;
       --success: #38bdf8;
+      --chaos: #a855f7;
     }
 
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -194,6 +195,15 @@
         <input type="text" id="custom-word-input" placeholder="Type secret word...">
       </div>
 
+      <div class="input-group">
+        <label>Chaos Round Mode</label>
+        <select id="chaos-mode-select">
+          <option value="SURPRISE">🎲 Surprise (~15% Chance Everyone is Impostor)</option>
+          <option value="ALWAYS">🌀 Forced Chaos (100% Everyone is Impostor)</option>
+          <option value="OFF">🚫 Disabled (Normal Games Only)</option>
+        </select>
+      </div>
+
       <button onclick="hostStartGame()">Start Game</button>
     </div>
     <p id="waiting-msg" style="color: var(--subtext); font-size: 0.9rem;">Waiting for host to start...</p>
@@ -236,6 +246,7 @@
     let peer = null, isHost = false, roomCode = "", myName = "", myPeerId = "";
     let players = [];
     let hostConn = null, secretWord = "", currentCategory = "", impostorId = "";
+    let isChaosRound = false;
     let votes = {};
 
     window.onload = () => {
@@ -303,7 +314,7 @@
       joinBtn.disabled = true;
       joinBtn.innerText = "Connecting...";
 
-      if (peer) peer.destroy(); // Clean up existing connection if any
+      if (peer) peer.destroy();
       peer = new Peer();
 
       peer.on('open', (id) => {
@@ -364,7 +375,7 @@
       } else if (data.type === 'START_VOTING') {
         showVotingScreen(data.playerList);
       } else if (data.type === 'GAME_OVER') {
-        showResultScreen(data.ejectedName, data.isImpostor, data.secretWord, data.impostorName);
+        showResultScreen(data.ejectedName, data.isImpostor, data.secretWord, data.impostorName, data.isChaos, data.isTie);
       }
     }
 
@@ -392,12 +403,22 @@
         secretWord = list[Math.floor(Math.random() * list.length)];
       }
 
+      // Evaluate Chaos Mode Settings
+      const chaosSetting = document.getElementById('chaos-mode-select').value;
+      if (chaosSetting === 'ALWAYS') {
+        isChaosRound = true;
+      } else if (chaosSetting === 'SURPRISE') {
+        isChaosRound = (Math.random() < 0.15);
+      } else {
+        isChaosRound = false;
+      }
+
       const impostorIdx = Math.floor(Math.random() * players.length);
       impostorId = players[impostorIdx].id;
       votes = {};
 
       players.forEach((p) => {
-        const isImp = (p.id === impostorId);
+        const isImp = isChaosRound || (p.id === impostorId);
         const payload = {
           type: 'GAME_START',
           role: isImp ? 'IMPOSTOR' : 'CREWMATE',
@@ -455,47 +476,74 @@
     }
 
     function tallyVotes() {
-      let maxVotes = 0, ejectedId = null;
+      let maxVotes = 0, ejectedId = null, isTie = false;
+
+      // Handle Tie-break / Edge-cases
+      const voteCounts = {};
       for (let id in votes) {
-        if (votes[id] > maxVotes) { maxVotes = votes[id]; ejectedId = id; }
+        const count = votes[id];
+        voteCounts[count] = (voteCounts[count] || 0) + 1;
+        if (count > maxVotes) {
+          maxVotes = count;
+          ejectedId = id;
+        }
+      }
+
+      if (voteCounts[maxVotes] > 1) {
+        isTie = true; // Multiple players tied for top votes
       }
 
       const ejectedPlayer = players.find(p => p.id === ejectedId);
       const impostorPlayer = players.find(p => p.id === impostorId);
-      const isImp = (ejectedId === impostorId);
+      const isImp = isChaosRound || (!isTie && ejectedId === impostorId);
 
       players.forEach(p => {
         const payload = {
           type: 'GAME_OVER',
-          ejectedName: ejectedPlayer ? ejectedPlayer.name : "Nobody",
+          ejectedName: (isTie || !ejectedPlayer) ? "Tie / Skip" : ejectedPlayer.name,
           isImpostor: isImp,
           secretWord: secretWord,
-          impostorName: impostorPlayer ? impostorPlayer.name : "Unknown"
+          impostorName: isChaosRound ? "Everyone" : (impostorPlayer ? impostorPlayer.name : "Unknown"),
+          isChaos: isChaosRound,
+          isTie: isTie
         };
         if (p.conn) p.conn.send(payload);
-        else showResultScreen(payload.ejectedName, payload.isImpostor, payload.secretWord, payload.impostorName);
+        else showResultScreen(payload.ejectedName, payload.isImpostor, payload.secretWord, payload.impostorName, payload.isChaos, payload.isTie);
       });
     }
 
-    function showResultScreen(ejectedName, isImpostor, secretWord, impostorName) {
+    function showResultScreen(ejectedName, isImpostor, secretWord, impostorName, isChaos, isTie) {
       showScreen('result-screen');
       const title = document.getElementById('result-title');
       const details = document.getElementById('result-details');
 
-      if (isImpostor) {
-        title.innerText = "🎉 Crewmates Win!";
-        title.style.color = "var(--success)";
+      if (isChaos) {
+        title.innerText = "🌀 CHAOS ROUND!";
+        title.style.color = "var(--chaos)";
+        details.innerHTML = `
+          <p style="font-size:1.1rem; margin-top:0;">💥 <strong>EVERYONE WAS THE IMPOSTOR!</strong></p>
+          <hr style="border:0; border-top:1px solid var(--border); margin:10px 0;">
+          <p style="font-size:0.95rem; color:var(--subtext); margin:5px 0;">Nobody had the secret word: <strong>${secretWord}</strong></p>
+        `;
       } else {
-        title.innerText = "🚨 Impostor Wins!";
-        title.style.color = "var(--accent)";
-      }
+        if (isTie) {
+          title.innerText = "⚖️ Tie Vote!";
+          title.style.color = "var(--subtext)";
+        } else if (isImpostor) {
+          title.innerText = "🎉 Crewmates Win!";
+          title.style.color = "var(--success)";
+        } else {
+          title.innerText = "🚨 Impostor Wins!";
+          title.style.color = "var(--accent)";
+        }
 
-      details.innerHTML = `
-        <p style="font-size:1.1rem; margin-top:0;"><strong>${ejectedName}</strong> was voted out.</p>
-        <hr style="border:0; border-top:1px solid var(--border); margin:10px 0;">
-        <p style="font-size:0.95rem; color:var(--subtext); margin:5px 0;">The Impostor was: <strong>${impostorName}</strong></p>
-        <p style="font-size:0.95rem; color:var(--subtext); margin:5px 0;">Secret Word: <strong>${secretWord}</strong></p>
-      `;
+        details.innerHTML = `
+          <p style="font-size:1.1rem; margin-top:0;"><strong>${ejectedName}</strong> ${isTie ? 'were tied in votes' : 'was voted out'}.</p>
+          <hr style="border:0; border-top:1px solid var(--border); margin:10px 0;">
+          <p style="font-size:0.95rem; color:var(--subtext); margin:5px 0;">The Impostor was: <strong>${impostorName}</strong></p>
+          <p style="font-size:0.95rem; color:var(--subtext); margin:5px 0;">Secret Word: <strong>${secretWord}</strong></p>
+        `;
+      }
 
       if (isHost) {
         document.getElementById('next-round-btn').classList.remove('hidden');
@@ -507,6 +555,7 @@
     }
 
     function hostReturnToLobby() {
+      isChaosRound = false; // Reset Chaos status for next round
       broadcastLobbyState();
       showScreen('lobby-screen');
     }
