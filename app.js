@@ -56,9 +56,27 @@ function initPeer(id = null) {
     debug: 1,
     config: {
       iceServers: [
+        // Standard STUN servers for IP discovery
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
+        { urls: 'stun:stun2.l.google.com:19302' },
+        
+        // Free Public TURN servers from OpenRelay (Metered) to bypass strict NATs/Firewalls
+        {
+          urls: "turn:openrelay.metered.ca:80",
+          username: "openrelayproject",
+          credential: "openrelayproject"
+        },
+        {
+          urls: "turn:openrelay.metered.ca:443",
+          username: "openrelayproject",
+          credential: "openrelayproject"
+        },
+        {
+          urls: "turn:openrelay.metered.ca:443?transport=tcp",
+          username: "openrelayproject",
+          credential: "openrelayproject"
+        }
       ]
     }
   };
@@ -102,45 +120,57 @@ function joinRoom() {
   joinBtn.disabled = true;
   joinBtn.innerText = joinRetryCount > 0 ? `Retrying (${joinRetryCount}/3)...` : "Connecting...";
 
-  if (peer) peer.destroy();
-  peer = initPeer();
+  // 1. Give the old peer instance time to fully destroy and clear ports before retrying
+  if (peer) {
+    peer.destroy();
+    peer = null;
+  }
 
-  peer.on('open', (id) => {
-    myPeerId = id;
-    
-    hostConn = peer.connect(`impostor-room-${roomCode}`, { reliable: true });
+  // Use a small delay on retries to ensure WebRTC ports are closed
+  setTimeout(() => {
+    peer = initPeer();
 
-    let connectionTimeout = setTimeout(() => {
-      if (!hostConn || !hostConn.open) {
-        handleJoinFailure("Connection timed out. Ensure Host room is active.");
-      }
-    }, 8000);
+    peer.on('open', (id) => {
+      myPeerId = id;
+      
+      hostConn = peer.connect(`impostor-room-${roomCode}`, { reliable: true });
 
-    hostConn.on('open', () => {
-      clearTimeout(connectionTimeout);
-      // Send join request
-      hostConn.send({ type: 'JOIN', name: myName });
+      // 2. Increased timeout from 8s to 12s to handle signaling server delays
+      let connectionTimeout = setTimeout(() => {
+        if (!hostConn || !hostConn.open) {
+          handleJoinFailure("Connection timed out. Ensure Host room is active.");
+        }
+      }, 12000); 
+
+      hostConn.on('open', () => {
+        clearTimeout(connectionTimeout);
+        // 3. Added 500ms delay before sending the JOIN payload to fix the race condition
+        setTimeout(() => {
+          hostConn.send({ type: 'JOIN', name: myName });
+        }, 500);
+      });
+
+      hostConn.on('data', (data) => handleClientData(data));
+
+      hostConn.on('error', () => {
+        clearTimeout(connectionTimeout);
+        handleJoinFailure("Host room not found or offline.");
+      });
     });
 
-    hostConn.on('data', (data) => handleClientData(data));
-
-    hostConn.on('error', () => {
-      clearTimeout(connectionTimeout);
-      handleJoinFailure("Host room not found or offline.");
+    peer.on('error', () => {
+      handleJoinFailure("Failed to reach matchmaking server.");
     });
-  });
-
-  peer.on('error', () => {
-    handleJoinFailure("Failed to reach matchmaking server.");
-  });
+  }, joinRetryCount > 0 ? 1000 : 0); 
 }
 
 function handleJoinFailure(reason) {
   if (joinRetryCount < 2) {
     joinRetryCount++;
-    setTimeout(() => joinRoom(), 1500);
+    // 4. Increased delay between retries to 3 seconds to prevent browser port blocking
+    setTimeout(() => joinRoom(), 3000);
   } else {
-    alert(`${reason}\n\nTips:\n1. Make sure Host is on Lobby/Game screen.\n2. Re-enter your name if needed.`);
+    alert(`${reason}\n\nTips:\n1. Make sure Host is on the Lobby or Game screen.\n2. Re-enter your name if needed.\n3. Try switching off corporate/school Wi-Fi.`);
     resetJoinBtn();
   }
 }
