@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>The Impostor - Multiplayer</title>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --accent: #ef4444;
+      --text: #f8fafc;
+      --subtext: #94a3b8;
+      --border: #334155;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .card {
+      background-color: var(--card-bg);
+      padding: 2rem;
+      border-radius: 16px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      width: 100%;
+      max-width: 420px;
+      text-align: center;
+    }
+    h1 { margin-top: 0; color: var(--accent); }
+    .input-group { margin: 15px 0; text-align: left; }
+    label { display: block; margin-bottom: 5px; color: var(--subtext); font-size: 0.9rem; }
+    input {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #0f172a;
+      color: white;
+      box-sizing: border-box;
+      font-size: 1rem;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      background-color: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-weight: bold;
+      font-size: 1rem;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    .sec-btn { background-color: #334155; }
+    .room-code {
+      font-size: 1.8rem;
+      font-weight: bold;
+      letter-spacing: 2px;
+      color: #38bdf8;
+      background: #0f172a;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px dashed var(--border);
+      margin: 15px 0;
+      word-break: break-all;
+    }
+    .player-list {
+      text-align: left;
+      background: #0f172a;
+      padding: 10px 15px;
+      border-radius: 8px;
+      margin: 15px 0;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+    .secret-card {
+      background: #0f172a;
+      border: 2px dashed var(--border);
+      padding: 25px;
+      border-radius: 8px;
+      margin: 20px 0;
+      font-size: 1.4rem;
+      font-weight: bold;
+    }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+
+  <!-- HOME SCREEN -->
+  <div class="card" id="home-screen">
+    <h1>🕵️ The Impostor</h1>
+    <div class="input-group">
+      <label>Your Name:</label>
+      <input type="text" id="player-name" placeholder="Enter your name">
+    </div>
+    <button onclick="createRoom()">Create Game (Host)</button>
+    <div style="margin: 15px 0; color: var(--subtext);">— OR —</div>
+    <div class="input-group">
+      <label>Room Code:</label>
+      <input type="text" id="join-code" placeholder="Enter Room Code">
+    </div>
+    <button class="sec-btn" onclick="joinRoom()">Join Game</button>
+  </div>
+
+  <!-- LOBBY SCREEN -->
+  <div class="card hidden" id="lobby-screen">
+    <h2 id="lobby-title">Lobby</h2>
+    <p style="color: var(--subtext);">Share this link or code with players:</p>
+    <div class="room-code" id="display-code">...</div>
+    <button class="sec-btn" onclick="copyInviteLink()">📋 Copy Invite Link</button>
+
+    <h3>Players Connected:</h3>
+    <div class="player-list" id="player-list-display">
+      <div>• Connecting...</div>
+    </div>
+
+    <div id="host-controls" class="hidden">
+      <div class="input-group">
+        <label>Custom Word (Optional):</label>
+        <input type="text" id="custom-word-input" placeholder="Leave blank for random">
+      </div>
+      <button onclick="hostStartGame()">Start Game</button>
+    </div>
+    <p id="waiting-msg" style="color: var(--subtext);">Waiting for host to start...</p>
+  </div>
+
+  <!-- GAME SCREEN -->
+  <div class="card hidden" id="game-screen">
+    <h2>Your Secret Role</h2>
+    <div class="secret-card" id="role-display">
+      Loading...
+    </div>
+    <p style="color: var(--subtext);">Discuss with the group and find out who doesn't know the word!</p>
+    <button id="restart-btn" class="hidden" onclick="hostRestartGame()">Play Again</button>
+  </div>
+
+  <script>
+    const BUILT_IN_WORDS = ["Pizza", "Space", "Beach", "Castle", "Superhero", "Doctor", "Penguin", "Bicycle", "Dragon", "Coffee", "Airplane", "Pyramid", "Telescope", "Submarine", "Volcano", "Hollywood", "Basketball", "Dinosaur", "Astronaut", "Eiffel Tower"];
+    
+    let peer = null;
+    let isHost = false;
+    let roomCode = "";
+    let myName = "";
+    let players = []; // { id, name, conn }
+    let hostConn = null;
+
+    // Check if joining via URL link
+    window.onload = () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const codeFromUrl = urlParams.get('room');
+      if (codeFromUrl) {
+        document.getElementById('join-code').value = codeFromUrl;
+      }
+    };
+
+    function getName() {
+      const name = document.getElementById('player-name').value.trim();
+      if (!name) { alert("Please enter your name!"); return null; }
+      return name;
+    }
+
+    // HOST FLOW
+    function createRoom() {
+      myName = getName();
+      if (!myName) return;
+
+      isHost = true;
+      roomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+      
+      peer = new Peer(`impostor-room-${roomCode}`);
+
+      peer.on('open', () => {
+        showLobby();
+        players.push({ id: peer.id, name: myName, conn: null });
+        updatePlayerList();
+      });
+
+      peer.on('connection', (conn) => {
+        conn.on('data', (data) => {
+          if (data.type === 'JOIN') {
+            players.push({ id: conn.peer, name: data.name, conn: conn });
+            updatePlayerList();
+            broadcastLobbyState();
+          }
+        });
+      });
+
+      peer.on('error', (err) => alert("Error creating room. Try again!"));
+    }
+
+    // JOINER FLOW
+    function joinRoom() {
+      myName = getName();
+      if (!myName) return;
+
+      const codeInput = document.getElementById('join-code').value.trim().toUpperCase();
+      if (!codeInput) return alert("Please enter a Room Code!");
+
+      roomCode = codeInput;
+      peer = new Peer();
+
+      peer.on('open', () => {
+        hostConn = peer.connect(`impostor-room-${roomCode}`);
+        
+        hostConn.on('open', () => {
+          hostConn.send({ type: 'JOIN', name: myName });
+          showLobby();
+        });
+
+        hostConn.on('data', (data) => {
+          if (data.type === 'LOBBY_STATE') {
+            updatePlayerListFromNames(data.playerNames);
+          } else if (data.type === 'GAME_START') {
+            showGameScreen(data.role, data.word);
+          }
+        });
+
+        hostConn.on('error', () => alert("Could not connect to room!"));
+      });
+    }
+
+    function showLobby() {
+      document.getElementById('home-screen').classList.add('hidden');
+      document.getElementById('lobby-screen').classList.remove('hidden');
+      document.getElementById('display-code').innerText = roomCode;
+
+      if (isHost) {
+        document.getElementById('host-controls').classList.remove('hidden');
+        document.getElementById('waiting-msg').classList.add('hidden');
+      }
+    }
+
+    function updatePlayerList() {
+      const names = players.map(p => p.name);
+      updatePlayerListFromNames(names);
+    }
+
+    function updatePlayerListFromNames(names) {
+      const listEl = document.getElementById('player-list-display');
+      listEl.innerHTML = names.map(n => `<div>• ${n}</div>`).join('');
+    }
+
+    function broadcastLobbyState() {
+      const names = players.map(p => p.name);
+      players.forEach(p => {
+        if (p.conn) p.conn.send({ type: 'LOBBY_STATE', playerNames: names });
+      });
+    }
+
+    function hostStartGame() {
+      if (players.length < 3) return alert("You need at least 3 players to start!");
+
+      const customWord = document.getElementById('custom-word-input').value.trim();
+      const secretWord = customWord || BUILT_IN_WORDS[Math.floor(Math.random() * BUILT_IN_WORDS.length)];
+      
+      const impostorIndex = Math.floor(Math.random() * players.length);
+
+      players.forEach((p, index) => {
+        const isImpostor = (index === impostorIndex);
+        const data = {
+          type: 'GAME_START',
+          role: isImpostor ? 'IMPOSTOR' : 'CREWMATE',
+          word: isImpostor ? null : secretWord
+        };
+
+        if (p.conn) {
+          p.conn.send(data);
+        } else {
+          // Host's own view
+          showGameScreen(data.role, data.word);
+        }
+      });
+    }
+
+    function showGameScreen(role, word) {
+      document.getElementById('lobby-screen').classList.add('hidden');
+      document.getElementById('game-screen').classList.remove('hidden');
+
+      const display = document.getElementById('role-display');
+      if (role === 'IMPOSTOR') {
+        display.innerText = "🚨 YOU ARE THE IMPOSTOR!";
+        display.style.color = "var(--accent)";
+      } else {
+        display.innerText = `Word: ${word}`;
+        display.style.color = "#38bdf8";
+      }
+
+      if (isHost) {
+        document.getElementById('restart-btn').classList.remove('hidden');
+      }
+    }
+
+    function copyInviteLink() {
+      const link = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+      navigator.clipboard.writeText(link);
+      alert("Invite link copied to clipboard!");
+    }
+
+    function hostRestartGame() {
+      location.reload();
+    }
+  </script>
+</body>
+</html>
