@@ -18,13 +18,10 @@
       --success: #38bdf8;
     }
 
-    * {
-      box-sizing: border-box;
-      -webkit-tap-highlight-color: transparent;
-    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background-color: var(--bg);
       color: var(--text);
       display: flex;
@@ -115,9 +112,6 @@
     .player-item {
       padding: 6px 0;
       border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
     }
 
     .secret-card {
@@ -138,19 +132,6 @@
       margin-top: 6px;
     }
 
-    .divider {
-      margin: 14px 0;
-      color: var(--subtext);
-      font-size: 0.85rem;
-      display: flex;
-      align-items: center;
-    }
-    .divider::before, .divider::after {
-      content: ""; flex: 1; border-bottom: 1px solid var(--border);
-    }
-    .divider::before { margin-right: 10px; }
-    .divider::after { margin-left: 10px; }
-
     .hidden { display: none !important; }
   </style>
 </head>
@@ -159,19 +140,26 @@
   <!-- HOME SCREEN -->
   <div class="app-card" id="home-screen">
     <h1>🕵️ The Impostor</h1>
+    <p id="welcome-subtext" style="color: var(--subtext); font-size: 0.9rem; margin-top: -10px;"></p>
+
     <div class="input-group">
       <label>Your Nickname</label>
       <input type="text" id="player-name" placeholder="Enter name..." autocomplete="off">
     </div>
-    <button onclick="createRoom()">Create Room (Host)</button>
 
-    <div class="divider">OR</div>
-
-    <div class="input-group">
-      <label>Room Code</label>
-      <input type="text" id="join-code" placeholder="e.g. X7K2P" style="text-transform: uppercase;" autocomplete="off">
+    <!-- HOST UI ONLY -->
+    <div id="host-start-container">
+      <button onclick="createRoom()">Create Game Room</button>
     </div>
-    <button class="sec-btn" onclick="joinRoom()">Join Game</button>
+
+    <!-- PLAYER UI ONLY -->
+    <div id="player-join-container" class="hidden">
+      <div class="input-group">
+        <label>Room Code</label>
+        <input type="text" id="join-code" readonly style="text-transform: uppercase; color: var(--subtext);">
+      </div>
+      <button onclick="joinRoom()">Join Game</button>
+    </div>
   </div>
 
   <!-- LOBBY SCREEN -->
@@ -189,7 +177,7 @@
       <div class="input-group">
         <label>Category / Word Source</label>
         <select id="category-select" onchange="toggleCustomWordInput()">
-          <option value="RANDOM">🎲 Random (All Built-In Words)</option>
+          <option value="RANDOM">🎲 Random Category</option>
           <option value="Places & Landmarks">📍 Places & Landmarks</option>
           <option value="Food & Drink">🍔 Food & Drink</option>
           <option value="Pop Culture & Fantasy">🪄 Pop Culture & Fantasy</option>
@@ -222,7 +210,7 @@
   <!-- VOTING SCREEN -->
   <div class="app-card hidden" id="voting-screen">
     <h2>Who is the Impostor?</h2>
-    <p style="color: var(--subtext); font-size: 0.85rem;">Cast your vote based on who gave suspicious clues!</p>
+    <p style="color: var(--subtext); font-size: 0.85rem;">Cast your vote based on clues!</p>
     <div id="vote-options-list"></div>
   </div>
 
@@ -231,25 +219,41 @@
     <h2 id="result-title">Game Over</h2>
     <div class="secret-card" id="result-details"></div>
     <button id="next-round-btn" class="hidden" onclick="hostReturnToLobby()">Return to Lobby</button>
-    <p id="client-wait-lobby" style="color: var(--subtext); font-size: 0.9rem;">Waiting for host to start next round...</p>
+    <p id="client-wait-lobby" style="color: var(--subtext); font-size: 0.9rem;">Waiting for host...</p>
   </div>
 
   <script>
     const WORD_CATEGORIES = {
-      "Places & Landmarks": ["Eiffel Tower", "Pyramid", "Hollywood", "Volcano", "Hogwarts", "Airport", "Casino", "Aquarium", "Hospital", "Cinema"],
-      "Food & Drink": ["Pizza", "Sushi", "Chocolate", "Tacos", "Burger", "Pancakes", "Bubble Tea", "Spaghetti", "Donut", "Ramen"],
-      "Pop Culture & Fantasy": ["Superhero", "Dragon", "Wizard", "Unicorn", "Pirate", "Ninja", "Astronaut", "Alien", "Zombie", "Vampire"],
-      "Animals & Nature": ["Penguin", "Dinosaur", "Waterfall", "Tornado", "Octopus", "Kangaroo", "Flamingo", "Sloth", "Panda", "Cheetah"]
+      "Places & Landmarks": ["Eiffel Tower", "Pyramid", "Hollywood", "Volcano", "Hogwarts", "Airport", "Casino", "Aquarium", "Hospital"],
+      "Food & Drink": ["Pizza", "Sushi", "Chocolate", "Tacos", "Burger", "Pancakes", "Bubble Tea", "Spaghetti", "Donut"],
+      "Pop Culture & Fantasy": ["Superhero", "Dragon", "Wizard", "Unicorn", "Pirate", "Ninja", "Astronaut", "Alien", "Zombie"],
+      "Animals & Nature": ["Penguin", "Dinosaur", "Waterfall", "Tornado", "Octopus", "Kangaroo", "Flamingo", "Sloth", "Panda"]
     };
 
     let peer = null, isHost = false, roomCode = "", myName = "", myPeerId = "";
-    let players = []; // { id, name, conn }
+    let players = [];
     let hostConn = null, secretWord = "", currentCategory = "", impostorId = "";
-    let votes = {}; // { targetId: count }
+    let votes = {};
 
+    // URL PARAMETER DETECTION (HOST VS PLAYER)
     window.onload = () => {
-      const code = new URLSearchParams(window.location.search).get('room');
-      if (code) document.getElementById('join-code').value = code.toUpperCase();
+      const codeFromUrl = new URLSearchParams(window.location.search).get('room');
+      
+      if (codeFromUrl) {
+        // PLAYER FLOW: URL has ?room= parameter
+        isHost = false;
+        roomCode = codeFromUrl.toUpperCase();
+        document.getElementById('join-code').value = roomCode;
+        document.getElementById('host-start-container').classList.add('hidden');
+        document.getElementById('player-join-container').classList.remove('hidden');
+        document.getElementById('welcome-subtext').innerText = "Joining existing game room";
+      } else {
+        // HOST FLOW: URL has no parameters
+        isHost = true;
+        document.getElementById('host-start-container').classList.remove('hidden');
+        document.getElementById('player-join-container').classList.add('hidden');
+        document.getElementById('welcome-subtext').innerText = "Host a new party game";
+      }
     };
 
     function getName() {
@@ -266,22 +270,20 @@
 
       peer.on('open', (id) => {
         myPeerId = id;
+        players = [{ id: id, name: myName, conn: null }];
         showScreen('lobby-screen');
-        players.push({ id: peer.id, name: myName, conn: null });
         updatePlayerList();
       });
 
       peer.on('connection', (conn) => {
         conn.on('data', (data) => handleHostData(conn, data));
       });
+
+      peer.on('error', () => alert("Error creating room. Try refreshing!"));
     }
 
     function joinRoom() {
       myName = getName(); if (!myName) return;
-      const codeInput = document.getElementById('join-code').value.trim().toUpperCase();
-      if (!codeInput) return alert("Enter Room Code!");
-      
-      roomCode = codeInput;
       peer = new Peer();
 
       peer.on('open', (id) => {
@@ -294,6 +296,18 @@
 
     function handleHostData(conn, data) {
       if (data.type === 'JOIN') {
+        const isDuplicate = players.some(
+          p => p.name.trim().toLowerCase() === data.name.trim().toLowerCase()
+        );
+
+        if (isDuplicate) {
+          conn.send({ 
+            type: 'JOIN_REJECTED', 
+            reason: `The name "${data.name}" is already taken in this room. Choose a different nickname.` 
+          });
+          return;
+        }
+
         players.push({ id: conn.peer, name: data.name, conn: conn });
         updatePlayerList();
         broadcastLobbyState();
@@ -306,7 +320,11 @@
     }
 
     function handleClientData(data) {
-      if (data.type === 'LOBBY_STATE') {
+      if (data.type === 'JOIN_REJECTED') {
+        alert(data.reason);
+        if (peer) peer.destroy();
+        showScreen('home-screen');
+      } else if (data.type === 'LOBBY_STATE') {
         updatePlayerListFromNames(data.playerNames);
         showScreen('lobby-screen');
       } else if (data.type === 'GAME_START') {
@@ -324,7 +342,7 @@
     }
 
     function hostStartGame() {
-      if (players.length < 3) return alert("You need at least 3 players!");
+      if (players.length < 3) return alert("You need at least 3 players to start!");
 
       const catVal = document.getElementById('category-select').value;
       if (catVal === 'CUSTOM') {
@@ -420,7 +438,7 @@
           ejectedName: ejectedPlayer ? ejectedPlayer.name : "Nobody",
           isImpostor: isImp,
           secretWord: secretWord,
-          impostorName: impostorPlayer.name
+          impostorName: impostorPlayer ? impostorPlayer.name : "Unknown"
         };
         if (p.conn) p.conn.send(payload);
         else showResultScreen(payload.ejectedName, payload.isImpostor, payload.secretWord, payload.impostorName);
@@ -447,7 +465,13 @@
         <p style="font-size:0.95rem; color:var(--subtext); margin:5px 0;">Secret Word: <strong>${secretWord}</strong></p>
       `;
 
-      if (isHost) document.getElementById('next-round-btn').classList.remove('hidden');
+      if (isHost) {
+        document.getElementById('next-round-btn').classList.remove('hidden');
+        document.getElementById('client-wait-lobby').classList.add('hidden');
+      } else {
+        document.getElementById('next-round-btn').classList.add('hidden');
+        document.getElementById('client-wait-lobby').classList.remove('hidden');
+      }
     }
 
     function hostReturnToLobby() {
