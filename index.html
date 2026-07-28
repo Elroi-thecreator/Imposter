@@ -81,9 +81,12 @@
       cursor: pointer;
       margin-top: 10px;
       touch-action: manipulation;
+      transition: opacity 0.2s, transform 0.1s;
     }
 
-    button:active { transform: scale(0.98); background-color: var(--accent-active); }
+    button:active:not(:disabled) { transform: scale(0.98); background-color: var(--accent-active); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
     .sec-btn { background-color: #334155; }
 
     .room-code {
@@ -149,7 +152,7 @@
 
     <!-- HOST UI ONLY -->
     <div id="host-start-container">
-      <button onclick="createRoom()">Create Game Room</button>
+      <button id="create-btn" onclick="createRoom()">Create Game Room</button>
     </div>
 
     <!-- PLAYER UI ONLY -->
@@ -158,7 +161,7 @@
         <label>Room Code</label>
         <input type="text" id="join-code" readonly style="text-transform: uppercase; color: var(--subtext);">
       </div>
-      <button onclick="joinRoom()">Join Game</button>
+      <button id="join-btn" onclick="joinRoom()">Join Game</button>
     </div>
   </div>
 
@@ -235,12 +238,10 @@
     let hostConn = null, secretWord = "", currentCategory = "", impostorId = "";
     let votes = {};
 
-    // URL PARAMETER DETECTION (HOST VS PLAYER)
     window.onload = () => {
       const codeFromUrl = new URLSearchParams(window.location.search).get('room');
       
       if (codeFromUrl) {
-        // PLAYER FLOW: URL has ?room= parameter
         isHost = false;
         roomCode = codeFromUrl.toUpperCase();
         document.getElementById('join-code').value = roomCode;
@@ -248,7 +249,6 @@
         document.getElementById('player-join-container').classList.remove('hidden');
         document.getElementById('welcome-subtext').innerText = "Joining existing game room";
       } else {
-        // HOST FLOW: URL has no parameters
         isHost = true;
         document.getElementById('host-start-container').classList.remove('hidden');
         document.getElementById('player-join-container').classList.add('hidden');
@@ -262,8 +262,18 @@
       return name;
     }
 
+    function resetJoinBtn() {
+      const btn = document.getElementById('join-btn');
+      btn.disabled = false;
+      btn.innerText = "Join Game";
+    }
+
     function createRoom() {
       myName = getName(); if (!myName) return;
+      const createBtn = document.getElementById('create-btn');
+      createBtn.disabled = true;
+      createBtn.innerText = "Creating Room...";
+
       isHost = true;
       roomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
       peer = new Peer(`impostor-room-${roomCode}`);
@@ -279,18 +289,39 @@
         conn.on('data', (data) => handleHostData(conn, data));
       });
 
-      peer.on('error', () => alert("Error creating room. Try refreshing!"));
+      peer.on('error', () => {
+        alert("Error creating room. Try refreshing!");
+        createBtn.disabled = false;
+        createBtn.innerText = "Create Game Room";
+      });
     }
 
     function joinRoom() {
       myName = getName(); if (!myName) return;
+
+      const joinBtn = document.getElementById('join-btn');
+      joinBtn.disabled = true;
+      joinBtn.innerText = "Connecting...";
+
+      if (peer) peer.destroy(); // Clean up existing connection if any
       peer = new Peer();
 
       peer.on('open', (id) => {
         myPeerId = id;
         hostConn = peer.connect(`impostor-room-${roomCode}`);
+        
         hostConn.on('open', () => hostConn.send({ type: 'JOIN', name: myName }));
         hostConn.on('data', (data) => handleClientData(data));
+        
+        hostConn.on('error', () => {
+          alert("Could not connect to host.");
+          resetJoinBtn();
+        });
+      });
+
+      peer.on('error', () => {
+        alert("Network error. Could not reach server.");
+        resetJoinBtn();
       });
     }
 
@@ -303,7 +334,7 @@
         if (isDuplicate) {
           conn.send({ 
             type: 'JOIN_REJECTED', 
-            reason: `The name "${data.name}" is already taken in this room. Choose a different nickname.` 
+            reason: `The name "${data.name}" is already taken. Please pick another nickname.` 
           });
           return;
         }
@@ -322,6 +353,7 @@
     function handleClientData(data) {
       if (data.type === 'JOIN_REJECTED') {
         alert(data.reason);
+        resetJoinBtn();
         if (peer) peer.destroy();
         showScreen('home-screen');
       } else if (data.type === 'LOBBY_STATE') {
