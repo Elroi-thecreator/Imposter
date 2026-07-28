@@ -102,29 +102,32 @@
       margin: 12px 0;
     }
 
-    .player-list {
+    .player-list, .clue-board {
       text-align: left;
       background: var(--input-bg);
       padding: 10px 14px;
       border-radius: 12px;
       margin: 12px 0;
-      max-height: 140px;
+      max-height: 160px;
       overflow-y: auto;
       border: 1px solid var(--border);
     }
 
-    .player-item {
-      padding: 6px 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    .player-item, .clue-item {
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 0.95rem;
     }
+    .clue-item:last-child { border-bottom: none; }
+    .clue-author { color: var(--success); font-weight: bold; }
 
     .secret-card {
       background: var(--input-bg);
       border: 2px dashed var(--border);
-      padding: 24px 15px;
+      padding: 20px 15px;
       border-radius: 16px;
       margin: 16px 0;
-      font-size: 1.4rem;
+      font-size: 1.3rem;
       font-weight: 800;
     }
 
@@ -213,17 +216,34 @@
   <div class="app-card hidden" id="game-screen">
     <h2>Your Secret Role</h2>
     <div class="secret-card" id="role-display">Loading...</div>
-    <p id="category-hint" style="color: var(--subtext); font-size: 0.9rem;"></p>
+    <p id="category-hint" style="color: var(--subtext); font-size: 0.85rem; margin-top: -10px;"></p>
+
+    <!-- IN-GAME CLUE SUBMISSION -->
+    <div class="input-group" id="clue-input-box" style="margin-top: 20px;">
+      <label>Submit Your One-Word Clue</label>
+      <input type="text" id="clue-text-input" placeholder="Type your clue..." autocomplete="off">
+      <button id="submit-clue-btn" onclick="submitClue()">Send Clue</button>
+    </div>
+
+    <div style="margin-top: 15px;">
+      <h3>Shared Clues Board</h3>
+      <div class="clue-board" id="clue-board-display">
+        <p style="color:var(--subtext); font-size:0.85rem; text-align:center; margin:10px 0;">Waiting for clues...</p>
+      </div>
+    </div>
 
     <div id="host-discussion-controls" class="hidden" style="margin-top: 15px;">
-      <button onclick="hostStartVoting()">Start Voting Phase</button>
+      <button onclick="hostStartVoting()">Go To Voting Phase</button>
     </div>
   </div>
 
   <!-- VOTING SCREEN -->
   <div class="app-card hidden" id="voting-screen">
     <h2>Who is the Impostor?</h2>
-    <p style="color: var(--subtext); font-size: 0.85rem;">Cast your vote based on clues!</p>
+    <p style="color: var(--subtext); font-size: 0.85rem;">Review the clues board and cast your vote!</p>
+    
+    <div class="clue-board" id="voting-clues-summary" style="max-height: 110px;"></div>
+
     <div id="vote-options-list"></div>
   </div>
 
@@ -247,11 +267,11 @@
     let players = [];
     let hostConn = null, secretWord = "", currentCategory = "", impostorId = "";
     let isChaosRound = false;
+    let submittedClues = {};
     let votes = {};
 
     window.onload = () => {
       const codeFromUrl = new URLSearchParams(window.location.search).get('room');
-      
       if (codeFromUrl) {
         isHost = false;
         roomCode = codeFromUrl.toUpperCase();
@@ -345,7 +365,7 @@
         if (isDuplicate) {
           conn.send({ 
             type: 'JOIN_REJECTED', 
-            reason: `The name "${data.name}" is already taken. Please pick another nickname.` 
+            reason: `The name "${data.name}" is already taken. Choose another nickname.` 
           });
           return;
         }
@@ -353,6 +373,9 @@
         players.push({ id: conn.peer, name: data.name, conn: conn });
         updatePlayerList();
         broadcastLobbyState();
+      } else if (data.type === 'SEND_CLUE') {
+        submittedClues[data.author] = data.clue;
+        broadcastClues();
       } else if (data.type === 'CAST_VOTE') {
         votes[data.targetId] = (votes[data.targetId] || 0) + 1;
         if (Object.values(votes).reduce((a,b)=>a+b, 0) >= players.length) {
@@ -372,8 +395,10 @@
         showScreen('lobby-screen');
       } else if (data.type === 'GAME_START') {
         showGameScreen(data.role, data.word, data.category);
+      } else if (data.type === 'CLUES_UPDATE') {
+        renderClues(data.clues);
       } else if (data.type === 'START_VOTING') {
-        showVotingScreen(data.playerList);
+        showVotingScreen(data.playerList, data.clues);
       } else if (data.type === 'GAME_OVER') {
         showResultScreen(data.ejectedName, data.isImpostor, data.secretWord, data.impostorName, data.isChaos, data.isTie);
       }
@@ -403,18 +428,14 @@
         secretWord = list[Math.floor(Math.random() * list.length)];
       }
 
-      // Evaluate Chaos Mode Settings
       const chaosSetting = document.getElementById('chaos-mode-select').value;
-      if (chaosSetting === 'ALWAYS') {
-        isChaosRound = true;
-      } else if (chaosSetting === 'SURPRISE') {
-        isChaosRound = (Math.random() < 0.15);
-      } else {
-        isChaosRound = false;
-      }
+      if (chaosSetting === 'ALWAYS') isChaosRound = true;
+      else if (chaosSetting === 'SURPRISE') isChaosRound = (Math.random() < 0.15);
+      else isChaosRound = false;
 
       const impostorIdx = Math.floor(Math.random() * players.length);
       impostorId = players[impostorIdx].id;
+      submittedClues = {};
       votes = {};
 
       players.forEach((p) => {
@@ -433,6 +454,12 @@
 
     function showGameScreen(role, word, category) {
       showScreen('game-screen');
+      document.getElementById('clue-input-box').classList.remove('hidden');
+      document.getElementById('clue-text-input').value = "";
+      document.getElementById('submit-clue-btn').disabled = false;
+      document.getElementById('submit-clue-btn').innerText = "Send Clue";
+      document.getElementById('clue-board-display').innerHTML = `<p style="color:var(--subtext); font-size:0.85rem; text-align:center; margin:10px 0;">Waiting for clues...</p>`;
+
       const display = document.getElementById('role-display');
       const hint = document.getElementById('category-hint');
 
@@ -449,16 +476,56 @@
       if (isHost) document.getElementById('host-discussion-controls').classList.remove('hidden');
     }
 
-    function hostStartVoting() {
-      const playerListPayload = players.map(p => ({ id: p.id, name: p.name }));
+    function submitClue() {
+      const clue = document.getElementById('clue-text-input').value.trim();
+      if (!clue) return alert("Please type a clue!");
+
+      const btn = document.getElementById('submit-clue-btn');
+      btn.disabled = true;
+      btn.innerText = "Clue Sent ✓";
+
+      if (isHost) {
+        submittedClues[myName] = clue;
+        broadcastClues();
+      } else {
+        hostConn.send({ type: 'SEND_CLUE', author: myName, clue: clue });
+      }
+    }
+
+    function broadcastClues() {
       players.forEach(p => {
-        if (p.conn) p.conn.send({ type: 'START_VOTING', playerList: playerListPayload });
-        else showVotingScreen(playerListPayload);
+        if (p.conn) p.conn.send({ type: 'CLUES_UPDATE', clues: submittedClues });
+        else renderClues(submittedClues);
       });
     }
 
-    function showVotingScreen(playerListPayload) {
+    function renderClues(cluesObj) {
+      const board = document.getElementById('clue-board-display');
+      const keys = Object.keys(cluesObj);
+      if (keys.length === 0) return;
+
+      board.innerHTML = keys.map(author => `
+        <div class="clue-item"><span class="clue-author">${author}:</span> "${cluesObj[author]}"</div>
+      `).join('');
+    }
+
+    function hostStartVoting() {
+      const playerListPayload = players.map(p => ({ id: p.id, name: p.name }));
+      players.forEach(p => {
+        if (p.conn) p.conn.send({ type: 'START_VOTING', playerList: playerListPayload, clues: submittedClues });
+        else showVotingScreen(playerListPayload, submittedClues);
+      });
+    }
+
+    function showVotingScreen(playerListPayload, cluesObj) {
       showScreen('voting-screen');
+
+      const summary = document.getElementById('voting-clues-summary');
+      const keys = Object.keys(cluesObj || {});
+      summary.innerHTML = keys.length ? keys.map(author => `
+        <div class="clue-item"><span class="clue-author">${author}:</span> "${cluesObj[author]}"</div>
+      `).join('') : `<p style="color:var(--subtext); font-size:0.8rem; margin:5px 0;">No written clues submitted.</p>`;
+
       const listEl = document.getElementById('vote-options-list');
       listEl.innerHTML = playerListPayload.map(p => `
         <button class="vote-btn" onclick="submitVote('${p.id}')">Vote for ${p.name}</button>
@@ -477,9 +544,8 @@
 
     function tallyVotes() {
       let maxVotes = 0, ejectedId = null, isTie = false;
-
-      // Handle Tie-break / Edge-cases
       const voteCounts = {};
+      
       for (let id in votes) {
         const count = votes[id];
         voteCounts[count] = (voteCounts[count] || 0) + 1;
@@ -489,9 +555,7 @@
         }
       }
 
-      if (voteCounts[maxVotes] > 1) {
-        isTie = true; // Multiple players tied for top votes
-      }
+      if (voteCounts[maxVotes] > 1) isTie = true;
 
       const ejectedPlayer = players.find(p => p.id === ejectedId);
       const impostorPlayer = players.find(p => p.id === impostorId);
@@ -555,7 +619,9 @@
     }
 
     function hostReturnToLobby() {
-      isChaosRound = false; // Reset Chaos status for next round
+      isChaosRound = false;
+      submittedClues = {};
+      votes = {};
       broadcastLobbyState();
       showScreen('lobby-screen');
     }
