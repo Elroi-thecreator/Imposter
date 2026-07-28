@@ -12,6 +12,8 @@ let isChaosRound = false;
 let submittedClues = {};
 let votes = {};
 let joinRetryCount = 0;
+// Track game phase so we know what screen to show reconnecting players
+let gamePhase = "LOBBY"; 
 
 window.onload = () => {
   const codeFromUrl = new URLSearchParams(window.location.search).get('room');
@@ -98,6 +100,7 @@ function createRoom() {
   peer.on('open', (id) => {
     myPeerId = id;
     players = [{ id: id, name: myName, conn: null }];
+    gamePhase = "LOBBY";
     showScreen('lobby-screen');
     updatePlayerList();
   });
@@ -120,13 +123,11 @@ function joinRoom() {
   joinBtn.disabled = true;
   joinBtn.innerText = joinRetryCount > 0 ? `Retrying (${joinRetryCount}/3)...` : "Connecting...";
 
-  // 1. Give the old peer instance time to fully destroy and clear ports before retrying
   if (peer) {
     peer.destroy();
     peer = null;
   }
 
-  // Use a small delay on retries to ensure WebRTC ports are closed
   setTimeout(() => {
     peer = initPeer();
 
@@ -135,7 +136,6 @@ function joinRoom() {
       
       hostConn = peer.connect(`impostor-room-${roomCode}`, { reliable: true });
 
-      // 2. Increased timeout from 8s to 12s to handle signaling server delays
       let connectionTimeout = setTimeout(() => {
         if (!hostConn || !hostConn.open) {
           handleJoinFailure("Connection timed out. Ensure Host room is active.");
@@ -144,7 +144,6 @@ function joinRoom() {
 
       hostConn.on('open', () => {
         clearTimeout(connectionTimeout);
-        // 3. Added 500ms delay before sending the JOIN payload to fix the race condition
         setTimeout(() => {
           hostConn.send({ type: 'JOIN', name: myName });
         }, 500);
@@ -167,7 +166,6 @@ function joinRoom() {
 function handleJoinFailure(reason) {
   if (joinRetryCount < 2) {
     joinRetryCount++;
-    // 4. Increased delay between retries to 3 seconds to prevent browser port blocking
     setTimeout(() => joinRoom(), 3000);
   } else {
     alert(`${reason}\n\nTips:\n1. Make sure Host is on the Lobby or Game screen.\n2. Re-enter your name if needed.\n3. Try switching off corporate/school Wi-Fi.`);
@@ -179,26 +177,49 @@ function handleHostData(conn, data) {
   if (data.type === 'JOIN') {
     const nameLower = data.name.trim().toLowerCase();
     
-    // Find existing index if player is reconnecting after a refresh
+    // Find existing index if player is reconnecting after a refresh/sleep
     const existingIdx = players.findIndex(
       p => p.name.trim().toLowerCase() === nameLower
     );
 
     if (existingIdx !== -1) {
-      // Check if connection is alive. If dead, overwrite connection (Reconnection logic)
       const existingPlayer = players[existingIdx];
-      if (!existingPlayer.conn || !existingPlayer.conn.open) {
-        players[existingIdx].conn = conn;
-        players[existingIdx].id = conn.peer;
-        broadcastLobbyState();
-        return;
-      } else {
-        conn.send({ 
-          type: 'JOIN_REJECTED', 
-          reason: `The name "${data.name}" is actively being used. Choose a different nickname.` 
-        });
-        return;
+      
+      // FIX: Mobile devices often leave "ghost" connections that still read as open.
+      // Instead of rejecting the player, we assume it's the original player returning
+      // and forcefully overwrite their old connection.
+      if (existingPlayer.conn && existingPlayer.conn !== conn) {
+        try { existingPlayer.conn.close(); } catch(e) {}
       }
+
+      players[existingIdx].conn = conn;
+      players[existingIdx].id = conn.peer;
+      
+      // Catch the reconnected player up on the current game phase
+      if (gamePhase === "LOBBY") {
+        broadcastLobbyState();
+      } else if (gamePhase === "IN_GAME" || gamePhase === "VOTING") {
+        const isImp = isChaosRound || (players[existingIdx].id === impostorId);
+        conn.send({
+          type: 'GAME_START',
+          role: isImp ? 'IMPOSTOR' : 'CREWMATE',
+          word: isImp ? null : secretWord,
+          category: currentCategory
+        });
+        
+        if (Object.keys(submittedClues).length > 0) {
+          conn.send({ type: 'CLUES_UPDATE', clues: submittedClues });
+        }
+
+        if (gamePhase === "VOTING") {
+          conn.send({ 
+            type: 'START_VOTING', 
+            playerList: players.map(p => ({ id: p.id, name: p.name })), 
+            clues: submittedClues 
+          });
+        }
+      }
+      return;
     }
 
     players.push({ id: conn.peer, name: data.name, conn: conn });
@@ -268,6 +289,7 @@ function hostStartGame() {
   impostorId = players[impostorIdx].id;
   submittedClues = {};
   votes = {};
+  gamePhase = "IN_GAME";
 
   players.forEach((p) => {
     const isImp = isChaosRound || (p.id === impostorId);
@@ -341,6 +363,7 @@ function renderClues(cluesObj) {
 }
 
 function hostStartVoting() {
+  gamePhase = "VOTING";
   const playerListPayload = players.map(p => ({ id: p.id, name: p.name }));
   players.forEach(p => {
     if (p.conn) p.conn.send({ type: 'START_VOTING', playerList: playerListPayload, clues: submittedClues });
@@ -374,6 +397,7 @@ function submitVote(targetId) {
 }
 
 function tallyVotes() {
+  gamePhase = "RESULT";
   let maxVotes = 0, ejectedId = null, isTie = false;
   const voteCounts = {};
   
@@ -453,6 +477,7 @@ function hostReturnToLobby() {
   isChaosRound = false;
   submittedClues = {};
   votes = {};
+  gamePhase = "LOBBY";
   broadcastLobbyState();
   showScreen('lobby-screen');
 }
